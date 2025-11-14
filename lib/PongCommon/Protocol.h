@@ -19,6 +19,7 @@ enum MessageType : uint8_t {
     MSG_LAMP_IDLE = 0x13,              // Set idle mode
     MSG_LAMP_SCORE_DISPLAY = 0x14,     // Update score display
     MSG_LAMP_CONFIG = 0x15,            // Configuration update
+    MSG_LAMP_FRAME = 0x16,             // LED frame data (sequencer-oriented)
     MSG_LAMP_BROADCAST = 0x1F,         // Broadcast to all lamps
 
     // Bidirectional
@@ -154,6 +155,16 @@ struct StatusResponseMessage {
     uint8_t batteryLevel;   // 0-100 (if applicable)
     uint32_t uptime;        // Seconds since boot
     uint16_t freeHeap;      // Free heap in KB
+} __attribute__((packed));
+
+// LED Frame data (sequencer-oriented architecture)
+struct LampFrameMessage {
+    MessageHeader header;
+    uint8_t lampIndex;      // Target lamp (0-10)
+    uint8_t cobBrightness;  // COB LED brightness 0-255
+    uint8_t numLeds;        // Number of LEDs in frame (typically 20)
+    uint8_t rgbData[60];    // RGB data: [R0,G0,B0, R1,G1,B1, ... R19,G19,B19]
+                            // Max 60 bytes for 20 LEDs
 } __attribute__((packed));
 
 // =============================================================================
