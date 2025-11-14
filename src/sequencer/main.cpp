@@ -4,6 +4,8 @@
 #include <ArduinoOTA.h>
 #include <ArduinoJson.h>
 #include <PongCommon.h>
+#include <CommonUtils.h>
+#include <Constants.h>
 
 // =============================================================================
 // GAME STATE MACHINE
@@ -39,6 +41,7 @@ GameConfig gameConfig;
 VisualConfig visualConfig;
 Statistics stats;
 ConfigManager configManager;
+MacMappingTable macMapping;
 
 // Web server
 AsyncWebServer server(80);
@@ -97,13 +100,17 @@ String getIdleEffectName(uint8_t effect);
 
 void setup() {
     Serial.begin(115200);
-    delay(1000);
+    delay(BOOT_DELAY_MS);
 
-    Serial.println("\n\n");
-    Serial.println("========================================");
-    Serial.println("   1D PONG - SEQUENCER (Master)");
+    Serial.println("\n\n========================================");
+    Serial.println("   1D PONG - SEQUENCER (Refactored)");
     Serial.println("========================================");
     Serial.printf("MAC Address: %s\n", PongCommon::getMacAddress().c_str());
+
+    // Load MAC mapping table
+    if (!configManager.loadMacMapping(macMapping)) {
+        initMacMappingTable(macMapping);
+    }
 
     // Load configuration
     if (!configManager.loadGameConfig(gameConfig)) {
@@ -123,7 +130,7 @@ void setup() {
 
     deviceId = configManager.getDeviceId();
     if (deviceId == 0) {
-        deviceId = 1;  // Default sequencer ID
+        deviceId = DEVICEID_SEQUENCER_DEFAULT;
         configManager.setDeviceId(deviceId);
     }
 
@@ -151,10 +158,10 @@ void setup() {
     initWebServer();
 
     // Initialize OTA
-    initOTA();
+    OTAManager::initOTA("1dPong-Sequencer", DEFAULT_OTA_PASSWORD);
 
     // Send initial idle command
-    delay(500);  // Wait for lamps to boot
+    delay(LAMP_BOOT_WAIT_MS);  // Wait for lamps to boot
     sendIdleCommand();
 
     Serial.println("\n[OK] Sequencer ready!");
@@ -173,12 +180,12 @@ void loop() {
 
     // Periodic tasks
     unsigned long now = millis();
-    if (now - lastUpdate > 1000) {
+    if (now - lastUpdate > PERIODIC_UPDATE_INTERVAL_MS) {
         lastUpdate = now;
 
         // Update device timeout status
         for (int i = 0; i < NUM_LAMPS; i++) {
-            if (lamps[i].active && (now - lamps[i].lastSeen > 10000)) {
+            if (lamps[i].active && (now - lamps[i].lastSeen > DEVICE_TIMEOUT_MS)) {
                 lamps[i].active = false;
                 numActiveLamps--;
                 Serial.printf("[WARN] Lamp %d timeout\n", i);
@@ -186,7 +193,7 @@ void loop() {
         }
     }
 
-    delay(10);
+    delay(DISPLAY_UPDATE_INTERVAL_MS);
 }
 
 // =============================================================================
@@ -203,7 +210,7 @@ void updateGameLogic() {
 
         case STATE_WAITING_START:
             // Brief delay before ball starts moving
-            if (now - stateStartTime > 1000) {
+            if (now - stateStartTime > GAME_START_DELAY_MS) {
                 currentState = STATE_BALL_MOVING;
                 currentLampPosition = (currentPlayer == PLAYER_RIGHT) ? 0 : NUM_LAMPS - 1;
                 moveBallToLamp(currentLampPosition, currentPlayer);
@@ -217,7 +224,7 @@ void updateGameLogic() {
 
         case STATE_WAITING_PRESS:
             // Ball reached target, waiting for button press
-            if (now - targetReachedTime > gameConfig.perfectWindow * 2) {
+            if (now - targetReachedTime > gameConfig.perfectWindow * AUTO_MISS_TIMEOUT_MULTIPLIER) {
                 // Timeout - auto-miss
                 Serial.println("[GAME] Timeout - Auto Miss");
                 Player winner = (currentPlayer == PLAYER_LEFT) ? PLAYER_RIGHT : PLAYER_LEFT;
@@ -229,7 +236,7 @@ void updateGameLogic() {
 
         case STATE_EFFECT_PLAYING:
             // Effect is playing, wait for completion
-            if (now - stateStartTime > 2000) {  // 2 second effect duration
+            if (now - stateStartTime > GAME_EFFECT_DURATION_MS) {
                 if (leftScore >= gameConfig.winningScore || rightScore >= gameConfig.winningScore) {
                     currentState = STATE_GAME_OVER;
                     stateStartTime = now;
@@ -242,14 +249,14 @@ void updateGameLogic() {
 
         case STATE_ROUND_END:
             // Brief pause between rounds
-            if (now - stateStartTime > 1000) {
+            if (now - stateStartTime > GAME_ROUND_END_DELAY_MS) {
                 startNewRound();
             }
             break;
 
         case STATE_GAME_OVER:
             // Game finished, show winner
-            if (now - stateStartTime > 5000) {
+            if (now - stateStartTime > GAME_OVER_DISPLAY_MS) {
                 // Return to idle
                 leftScore = 0;
                 rightScore = 0;
@@ -569,69 +576,19 @@ void onESPNowSend(const uint8_t* mac, esp_now_send_status_t status) {
 // =============================================================================
 
 void initWiFi() {
-    WiFi.mode(WIFI_AP_STA);
-
     // Set hostname
     WiFi.setHostname("1dPong-Sequencer");
 
-    // Start Access Point
-    WiFi.softAP("1dPong-Config", "pong1234");
-    Serial.printf("[WiFi] AP started: 1dPong-Config\n");
-    Serial.printf("[WiFi] AP IP: %s\n", WiFi.softAPIP().toString().c_str());
-
-    // Connect to station (if credentials provided)
+    // Initialize WiFi (AP+STA mode)
     #ifdef WIFI_SSID
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-    Serial.printf("[WiFi] Connecting to %s...\n", WIFI_SSID);
-
-    int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-        delay(500);
-        Serial.print(".");
-        attempts++;
-    }
-
-    if (WiFi.status() == WL_CONNECTED) {
-        Serial.printf("\n[WiFi] Connected! IP: %s\n", WiFi.localIP().toString().c_str());
-    } else {
-        Serial.println("\n[WiFi] Connection failed, AP mode only");
-    }
+    WiFiManager::initAPandStation(DEFAULT_AP_SSID, DEFAULT_AP_PASSWORD,
+                                   WIFI_SSID, WIFI_PASSWORD, ESPNOW_CHANNEL);
+    #else
+    WiFiManager::initDefaultAP(ESPNOW_CHANNEL);
     #endif
-
-    // Ensure WiFi channel matches ESP-NOW
-    esp_wifi_set_channel(ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
 }
 
 // initWebServer() is now defined in webserver.h
-
-void initOTA() {
-    ArduinoOTA.setHostname("1dPong-Sequencer");
-    ArduinoOTA.setPassword("1dPongOTA");
-
-    ArduinoOTA.onStart([]() {
-        Serial.println("[OTA] Update starting...");
-    });
-
-    ArduinoOTA.onEnd([]() {
-        Serial.println("\n[OTA] Update complete!");
-    });
-
-    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-        Serial.printf("[OTA] Progress: %u%%\r", (progress / (total / 100)));
-    });
-
-    ArduinoOTA.onError([](ota_error_t error) {
-        Serial.printf("[OTA] Error[%u]: ", error);
-        if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
-        else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
-        else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
-        else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
-        else if (error == OTA_END_ERROR) Serial.println("End Failed");
-    });
-
-    ArduinoOTA.begin();
-    Serial.println("[OTA] Ready");
-}
 
 // =============================================================================
 // HELPER FUNCTIONS

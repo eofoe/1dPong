@@ -875,13 +875,116 @@ void setupWebServer() {
         JsonArray lampsArray = doc.createNestedArray("lamps");
         for (int i = 0; i < NUM_LAMPS; i++) {
             JsonObject lamp = lampsArray.createNestedObject();
+            lamp["index"] = i;
             lamp["active"] = lamps[i].active;
             lamp["rssi"] = lamps[i].rssi;
+
+            // Add MAC address if available
+            if (lamps[i].active) {
+                char macStr[18];
+                sprintf(macStr, "%02X:%02X:%02X:%02X:%02X:%02X",
+                       lamps[i].macAddr[0], lamps[i].macAddr[1], lamps[i].macAddr[2],
+                       lamps[i].macAddr[3], lamps[i].macAddr[4], lamps[i].macAddr[5]);
+                lamp["mac"] = macStr;
+            }
         }
 
         String response;
         serializeJson(doc, response);
         request->send(200, "application/json", response);
+    });
+
+    // Get MAC mapping table
+    server.on("/api/mac-mapping", HTTP_GET, [](AsyncWebServerRequest *request) {
+        DynamicJsonDocument doc(2048);
+
+        doc["count"] = macMapping.count;
+        JsonArray entries = doc.createNestedArray("entries");
+
+        for (uint8_t i = 0; i < macMapping.count; i++) {
+            JsonObject entry = entries.createNestedObject();
+            char macStr[9];
+            sprintf(macStr, "%02X:%02X:%02X",
+                   macMapping.entries[i].mac[0],
+                   macMapping.entries[i].mac[1],
+                   macMapping.entries[i].mac[2]);
+            entry["mac"] = macStr;
+            entry["lampIndex"] = macMapping.entries[i].lampIndex;
+        }
+
+        String response;
+        serializeJson(doc, response);
+        request->send(200, "application/json", response);
+    });
+
+    // Add or update MAC mapping
+    server.on("/api/mac-mapping", HTTP_POST, [](AsyncWebServerRequest *request) {},
+              NULL,
+              [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+        DynamicJsonDocument doc(512);
+        DeserializationError error = deserializeJson(doc, data);
+
+        if (error) {
+            request->send(400, "text/plain", "Invalid JSON");
+            return;
+        }
+
+        const char* macStr = doc["mac"];
+        uint8_t lampIndex = doc["lampIndex"];
+
+        if (!macStr || lampIndex > LAMP_INDEX_MAX) {
+            request->send(400, "text/plain", "Invalid parameters");
+            return;
+        }
+
+        // Parse MAC address (last 3 bytes)
+        uint8_t mac[3];
+        if (!MACHelper::parseMAC(macStr, mac, 3)) {
+            request->send(400, "text/plain", "Invalid MAC address format");
+            return;
+        }
+
+        // Add or update mapping
+        if (configManager.addMacMapping(macMapping, mac, lampIndex)) {
+            request->send(200, "text/plain", "OK");
+            Serial.printf("[WebUI] MAC mapping added: %s -> Lamp %d\n", macStr, lampIndex);
+        } else {
+            request->send(500, "text/plain", "Failed to save mapping");
+        }
+    });
+
+    // Delete MAC mapping
+    server.on("/api/mac-mapping", HTTP_DELETE, [](AsyncWebServerRequest *request) {},
+              NULL,
+              [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+        DynamicJsonDocument doc(256);
+        DeserializationError error = deserializeJson(doc, data);
+
+        if (error) {
+            request->send(400, "text/plain", "Invalid JSON");
+            return;
+        }
+
+        const char* macStr = doc["mac"];
+        if (!macStr) {
+            request->send(400, "text/plain", "Missing MAC address");
+            return;
+        }
+
+        // Parse MAC address (last 3 bytes)
+        uint8_t mac[3];
+        if (!MACHelper::parseMAC(macStr, mac, 3)) {
+            request->send(400, "text/plain", "Invalid MAC address format");
+            return;
+        }
+
+        // Remove mapping
+        if (configManager.removeMacMapping(macMapping, mac)) {
+            request->send(200, "text/plain", "OK");
+            Serial.printf("[WebUI] MAC mapping removed: %s\n", macStr);
+        } else {
+            request->send(404, "text/plain", "Mapping not found");
+        }
     });
 
     server.begin();
