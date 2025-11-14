@@ -266,6 +266,110 @@ public:
         prefs.end();
         return (written > 0);
     }
+
+    // Load MAC mapping table
+    bool loadMacMapping(MacMappingTable& table) {
+        if (!prefs.begin(NVS_NAMESPACE, true)) {
+            Serial.println("[ERROR] Failed to open NVS for MAC mapping");
+            return false;
+        }
+
+        size_t len = prefs.getBytes(NVS_KEY_MAC_MAPPING, &table, sizeof(MacMappingTable));
+        prefs.end();
+
+        if (len != sizeof(MacMappingTable) || !isMacMappingValid(table)) {
+            Serial.println("[WARN] Invalid MAC mapping table, initializing empty");
+            initMacMappingTable(table);
+            return false;
+        }
+
+        Serial.printf("[OK] MAC mapping table loaded (%d entries)\n", table.count);
+        return true;
+    }
+
+    // Save MAC mapping table
+    bool saveMacMapping(const MacMappingTable& table) {
+        if (!isMacMappingValid(table)) {
+            Serial.println("[ERROR] Invalid MAC mapping table");
+            return false;
+        }
+
+        if (!prefs.begin(NVS_NAMESPACE, false)) {
+            Serial.println("[ERROR] Failed to open NVS for writing MAC mapping");
+            return false;
+        }
+
+        size_t written = prefs.putBytes(NVS_KEY_MAC_MAPPING, &table, sizeof(MacMappingTable));
+        prefs.end();
+
+        if (written != sizeof(MacMappingTable)) {
+            Serial.println("[ERROR] Failed to write MAC mapping table");
+            return false;
+        }
+
+        Serial.printf("[OK] MAC mapping table saved (%d entries)\n", table.count);
+        return true;
+    }
+
+    // Add or update a MAC mapping
+    bool addMacMapping(MacMappingTable& table, const uint8_t* mac, uint8_t lampIndex) {
+        if (lampIndex > LAMP_INDEX_MAX) {
+            Serial.printf("[ERROR] Invalid lamp index: %d\n", lampIndex);
+            return false;
+        }
+
+        // Check if MAC already exists and update it
+        for (uint8_t i = 0; i < table.count; i++) {
+            if (memcmp(table.entries[i].mac, mac, MAC_PARTIAL_BYTES) == 0) {
+                table.entries[i].lampIndex = lampIndex;
+                Serial.printf("[INFO] Updated MAC mapping: %02X:%02X:%02X -> Lamp %d\n",
+                              mac[0], mac[1], mac[2], lampIndex);
+                return saveMacMapping(table);
+            }
+        }
+
+        // Add new entry if space available
+        if (table.count < MAX_MAC_MAPPINGS) {
+            memcpy(table.entries[table.count].mac, mac, MAC_PARTIAL_BYTES);
+            table.entries[table.count].lampIndex = lampIndex;
+            table.count++;
+            Serial.printf("[INFO] Added MAC mapping: %02X:%02X:%02X -> Lamp %d\n",
+                          mac[0], mac[1], mac[2], lampIndex);
+            return saveMacMapping(table);
+        }
+
+        Serial.println("[ERROR] MAC mapping table full");
+        return false;
+    }
+
+    // Remove a MAC mapping
+    bool removeMacMapping(MacMappingTable& table, const uint8_t* mac) {
+        for (uint8_t i = 0; i < table.count; i++) {
+            if (memcmp(table.entries[i].mac, mac, MAC_PARTIAL_BYTES) == 0) {
+                // Shift remaining entries down
+                for (uint8_t j = i; j < table.count - 1; j++) {
+                    table.entries[j] = table.entries[j + 1];
+                }
+                table.count--;
+                Serial.printf("[INFO] Removed MAC mapping: %02X:%02X:%02X\n",
+                              mac[0], mac[1], mac[2]);
+                return saveMacMapping(table);
+            }
+        }
+
+        Serial.println("[WARN] MAC mapping not found");
+        return false;
+    }
+
+    // Find lamp index by MAC address
+    int8_t findLampIndex(const MacMappingTable& table, const uint8_t* mac) {
+        for (uint8_t i = 0; i < table.count; i++) {
+            if (memcmp(table.entries[i].mac, mac, MAC_PARTIAL_BYTES) == 0) {
+                return table.entries[i].lampIndex;
+            }
+        }
+        return -1;  // Not found
+    }
 };
 
 // =============================================================================

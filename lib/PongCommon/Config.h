@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include "Protocol.h"
+#include "Constants.h"
 
 // =============================================================================
 // GAME CONFIGURATION STRUCTURE
@@ -208,6 +209,31 @@ inline float getPlayerAverageReaction(const Statistics& stats, Player player) {
 }
 
 // =============================================================================
+// MAC MAPPING STRUCTURE
+// =============================================================================
+
+struct MacMapping {
+    uint8_t mac[MAC_PARTIAL_BYTES];  // Last 3 bytes of MAC address
+    uint8_t lampIndex;               // Lamp position (0-10)
+} __attribute__((packed));
+
+struct MacMappingTable {
+    uint8_t count;                   // Number of valid entries
+    MacMapping entries[MAX_MAC_MAPPINGS];
+    uint32_t magic;                  // Validation marker
+} __attribute__((packed));
+
+// Initialize empty MAC mapping table
+inline void initMacMappingTable(MacMappingTable& table) {
+    memset(&table, 0, sizeof(MacMappingTable));
+    table.magic = CONFIG_MAGIC;
+}
+
+inline bool isMacMappingValid(const MacMappingTable& table) {
+    return table.magic == CONFIG_MAGIC && table.count <= MAX_MAC_MAPPINGS;
+}
+
+// =============================================================================
 // NVS/PREFERENCES KEYS
 // =============================================================================
 
@@ -216,5 +242,6 @@ inline float getPlayerAverageReaction(const Statistics& stats, Player player) {
 #define NVS_KEY_VISUAL_CONFIG "vis_cfg"
 #define NVS_KEY_STATISTICS "stats"
 #define NVS_KEY_DEVICE_ID "dev_id"
+#define NVS_KEY_MAC_MAPPING "mac_map"
 
 #endif // CONFIG_H
