@@ -5,6 +5,31 @@
 #include <PongCommon.h>
 #include <LedEffects.h>
 
+/*
+ * ============================================================================
+ * 1D PONG - LAMP FIRMWARE
+ * ============================================================================
+ *
+ * SETUP INSTRUCTIONS:
+ *
+ * 1. Flash this firmware to all 11 lamps (same code for all)
+ * 2. Power on each lamp and open serial monitor (115200 baud)
+ * 3. Note the MAC address printed on boot:
+ *    [CONFIG] Final lamp index: X (MAC: XX:XX:XX:XX:XX:XX)
+ * 4. Edit the macMapping[] table below with your MAC addresses
+ * 5. Re-flash all lamps with the updated mapping table
+ * 6. Done! Positions are saved to NVS and persist across reboots
+ *
+ * EXAMPLE OUTPUT:
+ *    [WARN] MAC not in mapping table, using fallback: 3
+ *    [INFO] Add this MAC to macMapping[] in lamp/main.cpp:
+ *           {{0xAB, 0xCD, 0xEF}, 3},  // Lamp 3
+ *
+ * Copy the suggested line into macMapping[] and reflash.
+ *
+ * ============================================================================
+ */
+
 // =============================================================================
 // HARDWARE CONFIGURATION
 // =============================================================================
@@ -21,12 +46,29 @@
 #define NUM_STRIP_LEDS 20
 #endif
 
-// Lamp position detection (using GPIO pins or hardcoded)
-// Set jumpers on pins to encode lamp index 0-10 in binary (4 pins needed)
-#define LAMP_ID_PIN_0 16
-#define LAMP_ID_PIN_1 17
-#define LAMP_ID_PIN_2 18
-#define LAMP_ID_PIN_3 19
+// =============================================================================
+// LAMP POSITION MAPPING
+// =============================================================================
+// Map MAC addresses to lamp positions (0-10)
+// Add your lamp MAC addresses here after first boot
+// Format: Last 3 bytes of MAC address -> Lamp Index
+// You can find MAC addresses in serial output on first boot
+
+struct MacToLamp {
+    uint8_t mac[3];  // Last 3 bytes of MAC
+    uint8_t lampIndex;
+};
+
+// Configuration table - edit this with your actual MAC addresses
+// After flashing, check serial monitor for MAC, then add mapping here
+MacToLamp macMapping[] = {
+    // Example entries (replace with your actual MACs):
+    // {{0xAB, 0xCD, 0xEF}, 0},  // Lamp 0
+    // {{0x12, 0x34, 0x56}, 1},  // Lamp 1
+    // Add all 11 lamps here...
+};
+
+const uint8_t MAC_MAPPING_COUNT = sizeof(macMapping) / sizeof(MacToLamp);
 
 // =============================================================================
 // GLOBAL VARIABLES
@@ -197,35 +239,48 @@ void loop() {
 // =============================================================================
 
 void detectLampIndex() {
-    #ifdef LAMP_ID_PIN_0
-    // Read lamp index from GPIO pins (binary encoding)
-    pinMode(LAMP_ID_PIN_0, INPUT_PULLUP);
-    pinMode(LAMP_ID_PIN_1, INPUT_PULLUP);
-    pinMode(LAMP_ID_PIN_2, INPUT_PULLUP);
-    pinMode(LAMP_ID_PIN_3, INPUT_PULLUP);
-    delay(10);
-
-    // Read binary value (inverted - LOW = 1, HIGH = 0)
-    uint8_t bit0 = (digitalRead(LAMP_ID_PIN_0) == LOW) ? 1 : 0;
-    uint8_t bit1 = (digitalRead(LAMP_ID_PIN_1) == LOW) ? 1 : 0;
-    uint8_t bit2 = (digitalRead(LAMP_ID_PIN_2) == LOW) ? 1 : 0;
-    uint8_t bit3 = (digitalRead(LAMP_ID_PIN_3) == LOW) ? 1 : 0;
-
-    lampIndex = (bit3 << 3) | (bit2 << 2) | (bit1 << 1) | bit0;
-
-    // Validate (must be 0-10)
-    if (lampIndex >= NUM_LAMPS) {
-        Serial.printf("[WARN] Invalid lamp index %d, defaulting to 0\n", lampIndex);
-        lampIndex = 0;
-    }
-    #else
-    // Fallback: Use last digit of MAC address
     uint8_t mac[6];
     WiFi.macAddress(mac);
-    lampIndex = mac[5] % NUM_LAMPS;
-    #endif
 
-    Serial.printf("[CONFIG] Lamp index: %d\n", lampIndex);
+    // First, check if lamp index is already stored in NVS
+    uint8_t storedIndex = configManager.getDeviceId();
+    if (storedIndex > 0 && storedIndex <= NUM_LAMPS + 10) {
+        // Device ID 11-21 maps to lamp index 0-10
+        lampIndex = storedIndex - 11;
+        Serial.printf("[CONFIG] Lamp index from NVS: %d\n", lampIndex);
+        return;
+    }
+
+    // Check MAC mapping table
+    bool found = false;
+    for (uint8_t i = 0; i < MAC_MAPPING_COUNT; i++) {
+        if (mac[3] == macMapping[i].mac[0] &&
+            mac[4] == macMapping[i].mac[1] &&
+            mac[5] == macMapping[i].mac[2]) {
+            lampIndex = macMapping[i].lampIndex;
+            found = true;
+            Serial.printf("[CONFIG] Lamp index from MAC mapping: %d\n", lampIndex);
+
+            // Save to NVS for faster boot next time
+            configManager.setDeviceId(11 + lampIndex);
+            break;
+        }
+    }
+
+    if (!found) {
+        // Fallback: Use last byte of MAC modulo 11
+        lampIndex = mac[5] % NUM_LAMPS;
+        Serial.printf("[WARN] MAC not in mapping table, using fallback: %d\n", lampIndex);
+        Serial.println("[INFO] Add this MAC to macMapping[] in lamp/main.cpp:");
+        Serial.printf("       {{0x%02X, 0x%02X, 0x%02X}, %d},  // Lamp %d\n",
+                      mac[3], mac[4], mac[5], lampIndex, lampIndex);
+
+        // Save fallback to NVS
+        configManager.setDeviceId(11 + lampIndex);
+    }
+
+    Serial.printf("[CONFIG] Final lamp index: %d (MAC: %02X:%02X:%02X:%02X:%02X:%02X)\n",
+                  lampIndex, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 }
 
 // =============================================================================

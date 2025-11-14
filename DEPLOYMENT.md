@@ -26,7 +26,6 @@ Complete step-by-step guide for building and deploying the 1D Pong system.
 - 1x WS2812B RGBW LED Strip (20 LEDs, ~1.2m at 60 LEDs/m)
 - 1x 1000µF capacitor (for LED strip power smoothing)
 - 1x 470Ω resistor (LED strip data line protection)
-- 4x DIP switches or jumpers (for lamp index configuration)
 - Power wiring
 - Heatsink for COB LED
 - Enclosure/mounting
@@ -81,30 +80,38 @@ ESP32 GPIO13 ──── [470Ω] ──── LED Strip DATA
 GND ──── LED Strip GND
 ```
 
-### Lamp Index Configuration
-```
-DIP Switch    Binary    Lamp Index
-  0 0 0 0   =  0000   =     0
-  0 0 0 1   =  0001   =     1
-  0 0 1 0   =  0010   =     2
-  0 0 1 1   =  0011   =     3
-  0 1 0 0   =  0100   =     4
-  0 1 0 1   =  0101   =     5
-  0 1 1 0   =  0110   =     6
-  0 1 1 1   =  0111   =     7
-  1 0 0 0   =  1000   =     8
-  1 0 0 1   =  1001   =     9
-  1 0 1 0   =  1010   =    10
+### Lamp Position Configuration (MAC-based)
 
-GPIO Mapping:
-  GPIO 16 = Bit 0 (LSB)
-  GPIO 17 = Bit 1
-  GPIO 18 = Bit 2
-  GPIO 19 = Bit 3 (MSB)
+**No DIP switches needed!** Lamp position is automatically determined by MAC address.
 
-DIP ON (closed) = Pull to GND = 1
-DIP OFF (open) = Pull-up to 3.3V = 0
+**Initial Setup Process:**
+1. Flash all 11 lamps with lamp firmware
+2. Power on each lamp and check serial monitor
+3. Lamp will display its MAC address and auto-assigned index (MAC % 11)
+4. Note the MAC addresses and desired positions
+5. Edit `src/lamp/main.cpp` and add MAC mappings:
+
+```cpp
+MacToLamp macMapping[] = {
+    {{0xAB, 0xCD, 0xEF}, 0},  // Lamp 0 - leftmost
+    {{0x12, 0x34, 0x56}, 1},  // Lamp 1
+    {{0x78, 0x9A, 0xBC}, 2},  // Lamp 2
+    // ... add all 11 lamps
+    {{0xDE, 0xF0, 0x12}, 10}, // Lamp 10 - rightmost
+};
 ```
+
+6. Re-flash lamp firmware with mapping table
+7. Positions are saved to NVS - no need to reflash again
+
+**Alternative: Manual Configuration via Serial**
+After first boot, you can manually set lamp index:
+```
+[INFO] Add this MAC to macMapping[] in lamp/main.cpp:
+       {{0xAB, 0xCD, 0xEF}, 3},  // Lamp 3
+```
+
+Copy this line into the mapping table and reflash.
 
 ## 🛠️ Assembly Steps
 
@@ -123,8 +130,7 @@ DIP OFF (open) = Pull-up to 3.3V = 0
 5. Mount in enclosure with arcade button accessible
 
 ### 3. Build Lamp Units (11x)
-1. Configure DIP switches for lamp index (0-10)
-2. Build COB LED driver circuit:
+1. Build COB LED driver circuit (no DIP switches needed):
    - Solder MOSFET circuit on perfboard
    - Connect GPIO12 to gate via 1kΩ resistor
    - Add 10kΩ pull-down on gate

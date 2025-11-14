@@ -60,10 +60,12 @@ Two players face off in a fast-paced reaction game:
 - Power supply (5V, sufficient for LEDs)
 
 ### Lamp Position Detection
-Configure lamp index (0-10) using GPIO pins:
-- GPIO 16, 17, 18, 19: Binary encoding with pull-up resistors
-- Pull LOW for binary 1, leave HIGH for binary 0
-- Example: Lamp 5 = 0101 = GPIO16=HIGH, GPIO17=LOW, GPIO18=HIGH, GPIO19=LOW
+**Automatic via MAC address - no hardware configuration needed!**
+- Flash all lamps with same firmware
+- Check serial monitor for MAC address on first boot
+- Edit MAC mapping table in `src/lamp/main.cpp`
+- Re-flash with mapping (positions saved to NVS)
+- See DEPLOYMENT.md for detailed setup instructions
 
 ### Buzzer Setup
 - 1x ESP32 per player
