@@ -178,7 +178,7 @@ public:
     void effectFire() {
         // Simple fire simulation
         static uint8_t heat[60];  // Heat map (max 60 LEDs)
-        uint8_t maxHeat = min(numLeds, 60);
+        uint8_t maxHeat = min((uint16_t)numLeds, (uint16_t)60);
 
         // Cool down every cell a little
         for (uint16_t i = 0; i < maxHeat; i++) {
@@ -360,7 +360,8 @@ public:
 
             for (int i = 0; i < numLeds; i++) {
                 int distance = abs(i - centerLed);
-                uint8_t brightness = max(0, 255 - (distance * 60));
+                int brightCalc = 255 - (distance * 60);
+                uint8_t brightness = (brightCalc < 0) ? 0 : (uint8_t)brightCalc;
                 strip[i] = color;
                 strip[i].nscale8(brightness);
             }
@@ -376,7 +377,8 @@ public:
             uint8_t centerLed = numLeds / 2;
             for (int i = 0; i < numLeds; i++) {
                 int distance = abs(i - centerLed);
-                uint8_t brightness = max(0, 255 - (distance * 40));
+                int brightCalc = 255 - (distance * 40);
+                uint8_t brightness = (brightCalc < 0) ? 0 : (uint8_t)brightCalc;
                 strip[i] = color;
                 strip[i].nscale8(brightness);
             }

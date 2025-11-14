@@ -188,7 +188,7 @@ inline uint16_t calculateSpeed(const GameConfig& config, uint16_t round) {
     }
 
     // Apply speed cap
-    return max(config.maxSpeed, speed);
+    return max((uint16_t)config.maxSpeed, (uint16_t)speed);
 }
 
 // Calculate average reaction time
