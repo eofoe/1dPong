@@ -4,7 +4,6 @@
 #include <ArduinoOTA.h>
 #include <ArduinoJson.h>
 #include <PongCommon.h>
-#include "webserver.h"
 
 // =============================================================================
 // GAME STATE MACHINE
@@ -18,6 +17,17 @@ enum GameState {
     STATE_EFFECT_PLAYING,
     STATE_ROUND_END,
     STATE_GAME_OVER
+};
+
+// =============================================================================
+// DEVICE TRACKING STRUCTURE (must be before webserver.h include)
+// =============================================================================
+
+struct DeviceInfo {
+    uint8_t macAddr[6];
+    int8_t rssi;
+    uint32_t lastSeen;
+    bool active;
 };
 
 // =============================================================================
@@ -45,13 +55,6 @@ uint32_t targetReachedTime = 0;  // When ball reached target lamp
 bool gameActive = false;
 
 // Device tracking
-struct DeviceInfo {
-    uint8_t macAddr[6];
-    int8_t rssi;
-    uint32_t lastSeen;
-    bool active;
-};
-
 DeviceInfo buzzerLeft = {0};
 DeviceInfo buzzerRight = {0};
 DeviceInfo lamps[NUM_LAMPS] = {0};
@@ -60,6 +63,9 @@ uint8_t numActiveLamps = 0;
 // Timing
 unsigned long lastUpdate = 0;
 unsigned long stateStartTime = 0;
+
+// Include webserver after DeviceInfo is defined
+#include "webserver.h"
 
 // Device ID
 uint8_t deviceId = 0;
@@ -405,7 +411,7 @@ void processReactionTime(uint32_t reactionTime, Player player) {
         }
 
         // Super speed boost
-        currentSpeed = max(gameConfig.maxSpeed, currentSpeed / 2);
+        currentSpeed = max(gameConfig.maxSpeed, (uint16_t)(currentSpeed / 2));
 
     } else if (reactionTime <= gameConfig.perfectWindow) {
         // Perfect timing
